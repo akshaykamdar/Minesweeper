@@ -2,7 +2,6 @@ import javax.swing.*;
 import javax.swing.border.BevelBorder;
 import java.awt.*;
 import java.awt.event.*;
-import java.util.Random;
 
 public class MinesweeperGame extends JFrame {
 
@@ -10,8 +9,9 @@ public class MinesweeperGame extends JFrame {
     private static final int COLS = 9;
     private static final int NUM_MINES = 10;
 
+    private GameBoard gameBoard;  // New logic handler
+
     private JButton[][] buttons = new JButton[ROWS][COLS];
-    private Cell[][] cells = new Cell[ROWS][COLS];
     private boolean gameOver = false;
 
     private JLabel statusLabel = new JLabel("Game in progress");
@@ -27,8 +27,10 @@ public class MinesweeperGame extends JFrame {
         setLocationRelativeTo(null);
         setLayout(new BorderLayout());
 
-        JPanel topPanel = new JPanel();
-        topPanel.setLayout(new BorderLayout());
+        // Initialize game logic
+        gameBoard = new GameBoard(ROWS, COLS, NUM_MINES);
+
+        JPanel topPanel = new JPanel(new BorderLayout());
 
         statusLabel.setHorizontalAlignment(SwingConstants.CENTER);
         statusLabel.setFont(new Font("Arial", Font.BOLD, 16));
@@ -44,9 +46,7 @@ public class MinesweeperGame extends JFrame {
 
         add(topPanel, BorderLayout.NORTH);
 
-        JPanel panel = new JPanel();
-        panel.setLayout(new GridLayout(ROWS, COLS));
-
+        JPanel panel = new JPanel(new GridLayout(ROWS, COLS));
         for (int row = 0; row < ROWS; row++) {
             for (int col = 0; col < COLS; col++) {
                 JButton button = new JButton();
@@ -56,7 +56,36 @@ public class MinesweeperGame extends JFrame {
                 button.setFocusPainted(false);
                 button.setBackground(new Color(192, 192, 192));
                 button.setBorder(BorderFactory.createBevelBorder(BevelBorder.RAISED));
-                button.addMouseListener(new CellMouseListener(row, col));
+                int r = row;
+                int c = col;
+                button.addMouseListener(new MouseAdapter() {
+                    private boolean rightClickPressed = false;
+
+                    @Override
+                    public void mousePressed(MouseEvent e) {
+                        if (!gameOver && !gameBoard.isCellRevealed(r, c)) {
+                            if (SwingUtilities.isLeftMouseButton(e)) {
+                                button.setBorder(BorderFactory.createBevelBorder(BevelBorder.LOWERED));
+                            }
+                            if (SwingUtilities.isRightMouseButton(e)) {
+                                rightClickPressed = true;
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void mouseReleased(MouseEvent e) {
+                        if (!gameOver && !gameBoard.isCellRevealed(r, c)) {
+                            if (SwingUtilities.isLeftMouseButton(e)) {
+                                button.setBorder(BorderFactory.createBevelBorder(BevelBorder.RAISED));
+                                revealCell(r, c);
+                            } else if (SwingUtilities.isRightMouseButton(e) && rightClickPressed) {
+                                toggleFlag(r, c);
+                            }
+                        }
+                        rightClickPressed = false;
+                    }
+                });
                 buttons[row][col] = button;
                 panel.add(button);
             }
@@ -69,18 +98,7 @@ public class MinesweeperGame extends JFrame {
             timerLabel.setText("Time: " + elapsedSeconds);
         });
 
-        initGame();
         setVisible(true);
-    }
-
-    private void initGame() {
-        for (int row = 0; row < ROWS; row++) {
-            for (int col = 0; col < COLS; col++) {
-                cells[row][col] = new Cell();
-            }
-        }
-        placeMines();
-        calculateAdjacentMines();
     }
 
     private void resetGame() {
@@ -91,147 +109,97 @@ public class MinesweeperGame extends JFrame {
         timerLabel.setText("Time: 0");
         statusLabel.setText("Game in progress");
 
+        gameBoard.initializeGame();
+
         for (int row = 0; row < ROWS; row++) {
             for (int col = 0; col < COLS; col++) {
-                buttons[row][col].setText("");
-                buttons[row][col].setEnabled(true);
-                buttons[row][col].setBackground(new Color(192, 192, 192));
-                buttons[row][col].setForeground(Color.BLACK);
-                buttons[row][col].setBorder(BorderFactory.createBevelBorder(BevelBorder.RAISED));
-                cells[row][col] = new Cell();
-            }
-        }
-        placeMines();
-        calculateAdjacentMines();
-    }
-
-    private void placeMines() {
-        Random random = new Random();
-        int placedMines = 0;
-        while (placedMines < NUM_MINES) {
-            int row = random.nextInt(ROWS);
-            int col = random.nextInt(COLS);
-            if (!cells[row][col].isMine()) {
-                cells[row][col].setMine(true);
-                placedMines++;
-            }
-        }
-    }
-
-    private void calculateAdjacentMines() {
-        for (int row = 0; row < ROWS; row++) {
-            for (int col = 0; col < COLS; col++) {
-                if (!cells[row][col].isMine()) {
-                    int count = 0;
-                    for (int i = -1; i <= 1; i++) {
-                        for (int j = -1; j <= 1; j++) {
-                            int nRow = row + i;
-                            int nCol = col + j;
-                            if (nRow >= 0 && nRow < ROWS && nCol >= 0 && nCol < COLS) {
-                                if (cells[nRow][nCol].isMine()) {
-                                    count++;
-                                }
-                            }
-                        }
-                    }
-                    cells[row][col].setAdjacentMines(count);
-                }
+                JButton button = buttons[row][col];
+                button.setText("");
+                button.setEnabled(true);
+                button.setBackground(new Color(192, 192, 192));
+                button.setForeground(Color.BLACK);
+                button.setBorder(BorderFactory.createBevelBorder(BevelBorder.RAISED));
             }
         }
     }
 
     private void revealCell(int row, int col) {
-        if (row < 0 || row >= ROWS || col < 0 || col >= COLS) return;
-        if (cells[row][col].isRevealed() || gameOver || cells[row][col].isFlagged()) return;
-
         if (!timerStarted) {
             timerStarted = true;
             timer.start();
         }
 
-        cells[row][col].setRevealed(true);
-        JButton button = buttons[row][col];
+        boolean safe = gameBoard.revealCell(row, col);
+        updateCellUI(row, col);
 
-        button.setBorder(BorderFactory.createBevelBorder(BevelBorder.LOWERED));
-        button.setEnabled(false);
-        button.setBackground(new Color(224, 224, 224));
-
-        if (cells[row][col].isMine()) {
-            button.setText("X");
-            button.setForeground(Color.RED);
+        if (!safe) {
             gameOver = true;
             timer.stop();
             revealAllMines();
             statusLabel.setText("Game Over! You clicked a mine.");
             JOptionPane.showMessageDialog(this, "Game Over! You clicked a mine.");
-        } else {
-            int count = cells[row][col].getAdjacentMines();
-            if (count > 0) {
-                button.setText(String.valueOf(count));
-                button.setForeground(getColorForNumber(count));
-            } else {
-                button.setText("");
-                for (int i = -1; i <=1; i++) {
-                    for (int j = -1; j <=1; j++) {
-                        if(i != 0 || j != 0) {
-                            revealCell(row + i, col + j);
-                        }
-                    }
-                }
-            }
-
-            if (checkWin()) {
-                gameOver = true;
-                timer.stop();
-                statusLabel.setText("Congratulations! You won the game!");
-                JOptionPane.showMessageDialog(this, "Congratulations! You won the game!");
-            }
+        } else if (gameBoard.checkWin()) {
+            gameOver = true;
+            timer.stop();
+            statusLabel.setText("Congratulations! You won the game!");
+            JOptionPane.showMessageDialog(this, "Congratulations! You won the game!");
         }
     }
 
     private void toggleFlag(int row, int col) {
-        if (cells[row][col].isRevealed() || gameOver) return;
+        gameBoard.toggleFlag(row, col);
+        updateCellUI(row, col);
+    }
 
+    // Update UI button based on underlying gameBoard cell state
+    private void updateCellUI(int row, int col) {
         JButton button = buttons[row][col];
-        Cell cell = cells[row][col];
-        if (cell.isFlagged()) {
-            cell.setFlagged(false);
-            button.setText("");
-            button.setForeground(Color.BLACK);
-            button.setBorder(BorderFactory.createBevelBorder(BevelBorder.RAISED));
-        } else {
-            cell.setFlagged(true);
+
+        if (gameBoard.isCellRevealed(row, col)) {
+            button.setEnabled(false);
+            button.setBorder(BorderFactory.createBevelBorder(BevelBorder.LOWERED));
+            button.setBackground(new Color(224, 224, 224));
+
+            if (gameBoard.isCellMine(row, col)) {
+                button.setText("X");
+                button.setForeground(Color.RED);
+            } else {
+                int count = gameBoard.getAdjacentMineCount(row, col);
+                if (count > 0) {
+                    button.setText(String.valueOf(count));
+                    button.setForeground(getColorForNumber(count));
+                } else {
+                    button.setText("");
+                }
+            }
+        } else if (gameBoard.isCellFlagged(row, col)) {
+            button.setEnabled(true);
             button.setText("F");
             button.setForeground(Color.BLUE);
             button.setBorder(BorderFactory.createBevelBorder(BevelBorder.LOWERED));
+            button.setBackground(new Color(192, 192, 192));
+        } else {
+            button.setEnabled(true);
+            button.setText("");
+            button.setForeground(Color.BLACK);
+            button.setBorder(BorderFactory.createBevelBorder(BevelBorder.RAISED));
+            button.setBackground(new Color(192, 192, 192));
         }
     }
 
     private void revealAllMines() {
         for (int row = 0; row < ROWS; row++) {
             for (int col = 0; col < COLS; col++) {
-                if (cells[row][col].isMine()) {
+                if (gameBoard.isCellMine(row, col)) {
                     JButton button = buttons[row][col];
+                    button.setBorder(BorderFactory.createBevelBorder(BevelBorder.LOWERED));
+                    button.setBackground(new Color(224, 224, 224));
+                    button.setEnabled(false);
                     button.setText("X");
                     button.setForeground(Color.RED);
-                    button.setBackground(new Color(224, 224, 224));
-                    button.setBorder(BorderFactory.createBevelBorder(BevelBorder.LOWERED));
-                    button.setEnabled(false);
                 }
             }
         }
-    }
-
-    private boolean checkWin() {
-        int revealedCount = 0;
-        for (int row = 0; row < ROWS; row++) {
-            for (int col = 0; col < COLS; col++) {
-                if (cells[row][col].isRevealed()) {
-                    revealedCount++;
-                }
-            }
-        }
-        return revealedCount == (ROWS * COLS - NUM_MINES);
     }
 
     private Color getColorForNumber(int num) {
@@ -248,61 +216,7 @@ public class MinesweeperGame extends JFrame {
         }
     }
 
-    private class CellMouseListener extends MouseAdapter {
-        private final int row;
-        private final int col;
-        private boolean rightClickPressed = false;
-
-        public CellMouseListener(int row, int col) {
-            this.row = row;
-            this.col = col;
-        }
-
-        @Override
-        public void mousePressed(MouseEvent e) {
-            if (!gameOver && !cells[row][col].isRevealed()) {
-                if (SwingUtilities.isLeftMouseButton(e)) {
-                    buttons[row][col].setBorder(BorderFactory.createBevelBorder(BevelBorder.LOWERED));
-                }
-                if (SwingUtilities.isRightMouseButton(e)) {
-                    rightClickPressed = true;
-                }
-            }
-        }
-
-        @Override
-        public void mouseReleased(MouseEvent e) {
-            if (!gameOver && !cells[row][col].isRevealed()) {
-                if (SwingUtilities.isLeftMouseButton(e)) {
-                    buttons[row][col].setBorder(BorderFactory.createBevelBorder(BevelBorder.RAISED));
-                    revealCell(row, col);
-                } else if (SwingUtilities.isRightMouseButton(e) && rightClickPressed) {
-                    toggleFlag(row, col);
-                }
-            }
-            rightClickPressed = false;
-        }
-    }
-
-    private static class Cell {
-        private boolean isMine;
-        private int adjacentMines;
-        private boolean revealed;
-        private boolean flagged;
-
-        public boolean isMine() { return isMine; }
-        public void setMine(boolean mine) { isMine = mine; }
-
-        public int getAdjacentMines() { return adjacentMines; }
-        public void setAdjacentMines(int count) { adjacentMines = count; }
-
-        public boolean isRevealed() { return revealed; }
-        public void setRevealed(boolean val) { revealed = val; }
-
-        public boolean isFlagged() { return flagged; }
-        public void setFlagged(boolean val) { flagged = val; }
-    }
-
+    // Main method stays same
     public static void main(String[] args) {
         SwingUtilities.invokeLater(MinesweeperGame::new);
     }
